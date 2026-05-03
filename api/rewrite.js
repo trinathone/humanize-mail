@@ -1,15 +1,10 @@
 // Serverless rewrite endpoint with pluggable LLM providers.
 //
-// Configure with env vars:
-//   LLM_PROVIDER       = "gemini" | "ollama"   (default: "gemini")
-//   GEMINI_API_KEY     = your Google AI Studio key  (required if provider=gemini)
-//   GEMINI_MODEL       = e.g. "gemini-2.0-flash"    (default)
-//   OLLAMA_URL         = e.g. "http://localhost:11434" (default)
-//   OLLAMA_MODEL       = e.g. "llama3.1"            (default)
-//
-// On Vercel, only "gemini" works for the deployed URL — Vercel can't reach
-// your laptop's Ollama. For local dev (`vercel dev` or `npm run dev`), either
-// works.
+// Provider chain (tried in order, falls back on quota/rate errors):
+//   1. Groq  (GROQ_API_KEY)
+//   2. OpenRouter (OPENROUTER_API_KEY)
+//   3. Gemini (GEMINI_API_KEY_1/2/3 or GEMINI_API_KEY)
+//   4. Ollama (local only)
 
 const RATE_LIMIT_PER_HOUR = 30;
 const MAX_INPUT_CHARS = 8000;
@@ -69,22 +64,87 @@ function buildUserPrompt({ text, tone, strength, lengthPct }) {
   return lines.join("\n");
 }
 
-function getGeminiKeys() {
-  const keys = [
-    process.env.GEMINI_API_KEY_1,
-    process.env.GEMINI_API_KEY_2,
-    process.env.GEMINI_API_KEY_3,
-    process.env.GEMINI_API_KEY, // fallback to single key
-  ].filter(Boolean);
-  if (!keys.length) throw new Error("Server is missing GEMINI_API_KEY.");
-  return keys;
+function quotaError(msg, status) {
+  const err = new Error(msg);
+  err.isQuota = status === 429 || status === 503;
+  return err;
 }
 
+// ── Groq ─────────────────────────────────────────────────────────────────────
+async function callGroq({ system, userPrompt }) {
+  const apiKey = process.env.GROQ_API_KEY;
+  if (!apiKey) { const e = new Error("No GROQ_API_KEY"); e.isQuota = true; throw e; }
+
+  const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+    },
+    body: JSON.stringify({
+      model: process.env.GROQ_MODEL || "llama-3.3-70b-versatile",
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: userPrompt },
+      ],
+      temperature: 0.7,
+      max_tokens: 2048,
+    }),
+  });
+
+  if (!res.ok) {
+    const raw = await res.text();
+    let msg = `Groq error (${res.status}).`;
+    try { msg = JSON.parse(raw)?.error?.message || msg; } catch { /* ignore */ }
+    throw quotaError(msg, res.status);
+  }
+
+  const data = await res.json();
+  const out = (data.choices?.[0]?.message?.content || "").trim();
+  if (!out) throw new Error("Empty response from Groq.");
+  return out;
+}
+
+// ── OpenRouter ────────────────────────────────────────────────────────────────
+async function callOpenRouter({ system, userPrompt }) {
+  const apiKey = process.env.OPENROUTER_API_KEY;
+  if (!apiKey) { const e = new Error("No OPENROUTER_API_KEY"); e.isQuota = true; throw e; }
+
+  const res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${apiKey}`,
+      "HTTP-Referer": "https://sincerely-app.vercel.app",
+    },
+    body: JSON.stringify({
+      model: process.env.OPENROUTER_MODEL || "meta-llama/llama-3.3-70b-instruct:free",
+      messages: [
+        { role: "system", content: system },
+        { role: "user", content: userPrompt },
+      ],
+      temperature: 0.7,
+      max_tokens: 2048,
+    }),
+  });
+
+  if (!res.ok) {
+    const raw = await res.text();
+    let msg = `OpenRouter error (${res.status}).`;
+    try { msg = JSON.parse(raw)?.error?.message || msg; } catch { /* ignore */ }
+    throw quotaError(msg, res.status);
+  }
+
+  const data = await res.json();
+  const out = (data.choices?.[0]?.message?.content || "").trim();
+  if (!out) throw new Error("Empty response from OpenRouter.");
+  return out;
+}
+
+// ── Gemini ────────────────────────────────────────────────────────────────────
 async function callGeminiWithKey({ system, userPrompt, apiKey }) {
   const model = process.env.GEMINI_MODEL || "gemini-2.0-flash";
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
-    model
-  )}:generateContent?key=${apiKey}`;
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${apiKey}`;
 
   const res = await fetch(url, {
     method: "POST",
@@ -98,7 +158,7 @@ async function callGeminiWithKey({ system, userPrompt, apiKey }) {
 
   if (!res.ok) {
     const raw = await res.text();
-    let msg = `Gemini API error (${res.status}).`;
+    let msg = `Gemini error (${res.status}).`;
     let isQuota = false;
     try {
       const parsed = JSON.parse(raw);
@@ -111,31 +171,32 @@ async function callGeminiWithKey({ system, userPrompt, apiKey }) {
   }
 
   const data = await res.json();
-  const out =
-    (data.candidates || [])
-      .flatMap((c) => c.content?.parts || [])
-      .map((p) => p.text || "")
-      .join("")
-      .trim() || "";
+  const out = (data.candidates || [])
+    .flatMap((c) => c.content?.parts || [])
+    .map((p) => p.text || "")
+    .join("")
+    .trim();
   if (!out) throw new Error("Empty response from Gemini.");
   return out;
 }
 
 async function callGemini({ system, userPrompt }) {
-  const keys = getGeminiKeys();
+  const keys = [
+    process.env.GEMINI_API_KEY_1,
+    process.env.GEMINI_API_KEY_2,
+    process.env.GEMINI_API_KEY_3,
+    process.env.GEMINI_API_KEY,
+  ].filter(Boolean);
+  if (!keys.length) { const e = new Error("No Gemini keys configured."); e.isQuota = true; throw e; }
   let lastError;
   for (const apiKey of keys) {
-    try {
-      return await callGeminiWithKey({ system, userPrompt, apiKey });
-    } catch (e) {
-      lastError = e;
-      if (!e.isQuota) throw e; // non-quota error, don't bother trying next key
-      // quota error → try next key
-    }
+    try { return await callGeminiWithKey({ system, userPrompt, apiKey }); }
+    catch (e) { lastError = e; if (!e.isQuota) throw e; }
   }
   throw lastError;
 }
 
+// ── Ollama ────────────────────────────────────────────────────────────────────
 async function callOllama({ system, userPrompt }) {
   const base = process.env.OLLAMA_URL || "http://localhost:11434";
   const model = process.env.OLLAMA_MODEL || "llama3.1";
@@ -149,10 +210,9 @@ async function callOllama({ system, userPrompt }) {
         { role: "system", content: system },
         { role: "user", content: userPrompt },
       ],
-      options: { temperature: 0.7, num_predict: 1500 },
+      options: { temperature: 0.7, num_predict: 2048 },
     }),
   });
-
   if (!res.ok) {
     const raw = await res.text();
     throw new Error(`Ollama error (${res.status}): ${raw.slice(0, 200)}`);
@@ -163,58 +223,68 @@ async function callOllama({ system, userPrompt }) {
   return out;
 }
 
+// ── Provider chain ────────────────────────────────────────────────────────────
+async function runChain({ system, userPrompt }) {
+  const providers = [
+    { name: "groq", fn: callGroq },
+    { name: "openrouter", fn: callOpenRouter },
+    { name: "gemini", fn: callGemini },
+  ];
+  let lastError;
+  for (const { name, fn } of providers) {
+    try {
+      const out = await fn({ system, userPrompt });
+      return { out, provider: name };
+    } catch (e) {
+      lastError = e;
+      if (!e.isQuota) throw e; // hard error — don't try next
+      // quota/unavailable → try next provider
+    }
+  }
+  throw lastError;
+}
+
+// ── Handler ───────────────────────────────────────────────────────────────────
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
     return res.status(405).json({ error: "Method not allowed." });
   }
 
-  const provider = (process.env.LLM_PROVIDER || "gemini").toLowerCase();
+  // Local Ollama override
+  const forceProvider = (process.env.LLM_PROVIDER || "").toLowerCase();
 
   const ip = clientIp(req);
   const gate = checkRate(ip);
   if (!gate.ok) {
     return res.status(429).json({
-      error: `Rate limit reached (${RATE_LIMIT_PER_HOUR}/hour). Try again in ${Math.ceil(
-        gate.retryInSec / 60
-      )} minutes.`,
+      error: `Rate limit reached (${RATE_LIMIT_PER_HOUR}/hour). Try again in ${Math.ceil(gate.retryInSec / 60)} minutes.`,
     });
   }
 
   let body = req.body;
   if (typeof body === "string") {
-    try {
-      body = JSON.parse(body);
-    } catch {
-      return res.status(400).json({ error: "Invalid JSON body." });
-    }
+    try { body = JSON.parse(body); }
+    catch { return res.status(400).json({ error: "Invalid JSON body." }); }
   }
   const { text, tone, strength, lengthPct } = body || {};
 
-  if (typeof text !== "string" || !text.trim()) {
+  if (typeof text !== "string" || !text.trim())
     return res.status(400).json({ error: "Missing text." });
-  }
-  if (text.length > MAX_INPUT_CHARS) {
-    return res
-      .status(400)
-      .json({ error: `Input too long. Max ${MAX_INPUT_CHARS} characters.` });
-  }
-  if (!Object.prototype.hasOwnProperty.call(TONE_INSTRUCTIONS, tone)) {
+  if (text.length > MAX_INPUT_CHARS)
+    return res.status(400).json({ error: `Input too long. Max ${MAX_INPUT_CHARS} characters.` });
+  if (!Object.prototype.hasOwnProperty.call(TONE_INSTRUCTIONS, tone))
     return res.status(400).json({ error: "Invalid tone." });
-  }
 
   const userPrompt = buildUserPrompt({ text, tone, strength, lengthPct });
 
   try {
-    let out;
-    if (provider === "ollama") {
+    let out, provider;
+    if (forceProvider === "ollama") {
       out = await callOllama({ system: SYSTEM_PROMPT, userPrompt });
-    } else if (provider === "gemini") {
-      out = await callGemini({ system: SYSTEM_PROMPT, userPrompt });
+      provider = "ollama";
     } else {
-      return res
-        .status(500)
-        .json({ error: `Unknown LLM_PROVIDER: ${provider}` });
+      ({ out, provider } = await runChain({ system: SYSTEM_PROMPT, userPrompt }));
     }
     out = out.replace(/^["']|["']$/g, "").trim();
     return res.status(200).json({ text: out, provider });
