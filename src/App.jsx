@@ -420,14 +420,19 @@ export default function App() {
             <div
               style={{
                 fontSize: 11,
-                color: "var(--text-subtle)",
+                color: input.length > 7500 ? "var(--danger)" : input.length > 6000 ? "#d97706" : "var(--text-subtle)",
                 fontFamily: "var(--mono)",
                 marginTop: 6,
                 textAlign: "right",
               }}
             >
               {input.trim().split(/\s+/).filter(Boolean).length} words ·{" "}
-              {input.length} chars
+              {input.length} / 8000 chars
+              {input.length > 6000 && (
+                <span style={{ marginLeft: 6 }}>
+                  {input.length > 7500 ? "⚠ almost at limit" : "approaching limit"}
+                </span>
+              )}
             </div>
           </Section>
 
