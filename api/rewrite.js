@@ -69,9 +69,18 @@ function buildUserPrompt({ text, tone, strength, lengthPct }) {
   return lines.join("\n");
 }
 
-async function callGemini({ system, userPrompt }) {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) throw new Error("Server is missing GEMINI_API_KEY.");
+function getGeminiKeys() {
+  const keys = [
+    process.env.GEMINI_API_KEY_1,
+    process.env.GEMINI_API_KEY_2,
+    process.env.GEMINI_API_KEY_3,
+    process.env.GEMINI_API_KEY, // fallback to single key
+  ].filter(Boolean);
+  if (!keys.length) throw new Error("Server is missing GEMINI_API_KEY.");
+  return keys;
+}
+
+async function callGeminiWithKey({ system, userPrompt, apiKey }) {
   const model = process.env.GEMINI_MODEL || "gemini-2.0-flash";
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(
     model
@@ -83,20 +92,22 @@ async function callGemini({ system, userPrompt }) {
     body: JSON.stringify({
       systemInstruction: { role: "system", parts: [{ text: system }] },
       contents: [{ role: "user", parts: [{ text: userPrompt }] }],
-      generationConfig: { temperature: 0.7, maxOutputTokens: 1500 },
+      generationConfig: { temperature: 0.7, maxOutputTokens: 2048 },
     }),
   });
 
   if (!res.ok) {
     const raw = await res.text();
     let msg = `Gemini API error (${res.status}).`;
+    let isQuota = false;
     try {
       const parsed = JSON.parse(raw);
       if (parsed?.error?.message) msg = parsed.error.message;
-    } catch {
-      /* ignore */
-    }
-    throw new Error(msg);
+      if (parsed?.error?.status === "RESOURCE_EXHAUSTED") isQuota = true;
+    } catch { /* ignore */ }
+    const err = new Error(msg);
+    err.isQuota = isQuota || res.status === 429;
+    throw err;
   }
 
   const data = await res.json();
@@ -108,6 +119,21 @@ async function callGemini({ system, userPrompt }) {
       .trim() || "";
   if (!out) throw new Error("Empty response from Gemini.");
   return out;
+}
+
+async function callGemini({ system, userPrompt }) {
+  const keys = getGeminiKeys();
+  let lastError;
+  for (const apiKey of keys) {
+    try {
+      return await callGeminiWithKey({ system, userPrompt, apiKey });
+    } catch (e) {
+      lastError = e;
+      if (!e.isQuota) throw e; // non-quota error, don't bother trying next key
+      // quota error → try next key
+    }
+  }
+  throw lastError;
 }
 
 async function callOllama({ system, userPrompt }) {
