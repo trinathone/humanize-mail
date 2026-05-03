@@ -97,6 +97,7 @@ export default function App() {
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
   const [lastInput, setLastInput] = useState("");
+  const [provider, setProvider] = useState("");
   const [history, setHistory] = useState([]);
   const [showHistory, setShowHistory] = useState(false);
 
@@ -133,6 +134,7 @@ export default function App() {
     setError("");
     setLoading(true);
     setOutput("");
+    setProvider("");
     const activeTone = TONES[t];
 
     try {
@@ -151,6 +153,7 @@ export default function App() {
       setLastInput(text);
       const cleaned = (data.text || "").trim();
       setOutput(cleaned);
+      setProvider(data.provider || "");
 
       // Save to history
       const entry = {
@@ -510,6 +513,21 @@ export default function App() {
                   {output && (
                     <span style={{ color: "var(--text-muted)" }}>
                       · {tone.label} · {STRENGTH_LABELS[strength]} · ~{lengthPct}%
+                      {provider && (
+                        <span style={{
+                          marginLeft: 6,
+                          background: "var(--surface-2)",
+                          border: "1px solid var(--border)",
+                          borderRadius: 4,
+                          padding: "1px 6px",
+                          fontSize: 10,
+                          fontFamily: "var(--mono)",
+                          textTransform: "uppercase",
+                          letterSpacing: "0.06em",
+                        }}>
+                          {provider}
+                        </span>
+                      )}
                     </span>
                   )}
                 </label>
