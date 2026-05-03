@@ -104,6 +104,17 @@ export default function App() {
     setHistory(loadHistory());
   }, []);
 
+  useEffect(() => {
+    function onKey(e) {
+      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+        e.preventDefault();
+        if (!loading && input.trim()) runRewrite();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [loading, input, toneIdx, strength, lengthPct]);
+
   const tone = TONES[toneIdx];
   const diffed = useMemo(
     () => (output ? diffHighlight(lastInput, output) : null),
