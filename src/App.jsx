@@ -483,6 +483,9 @@ export default function App() {
                 <>
                   <Sparkles size={15} />
                   Humanize as {tone.label}
+                  <span style={{ fontSize: 11, opacity: 0.6, marginLeft: 4 }}>
+                    ⌘↵
+                  </span>
                 </>
               )}
             </button>
