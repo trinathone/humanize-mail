@@ -188,6 +188,15 @@ export default function App() {
     setOutput("");
     setLastInput("");
     setError("");
+    setProvider("");
+  }
+
+  function handleClearInput() {
+    setInput("");
+    setOutput("");
+    setLastInput("");
+    setError("");
+    setProvider("");
   }
 
   function handleClearHistory() {
@@ -480,6 +489,10 @@ export default function App() {
             <button onClick={handleReset} style={btnGhost}>
               <RotateCcw size={14} />
               Reset
+            </button>
+            <button onClick={handleClearInput} style={btnGhost}>
+              <X size={14} />
+              Clear
             </button>
             {error && (
               <span
