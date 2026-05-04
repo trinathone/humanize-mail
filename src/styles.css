@@ -132,3 +132,9 @@ input[type="range"]::-moz-range-thumb {
     transform: translateY(0);
   }
 }
+
+@media (max-width: 600px) {
+  textarea {
+    min-height: 240px !important;
+  }
+}
