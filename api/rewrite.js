@@ -289,6 +289,11 @@ export default async function handler(req, res) {
     out = out.replace(/^["']|["']$/g, "").trim();
     return res.status(200).json({ text: out, provider });
   } catch (e) {
-    return res.status(502).json({ error: e?.message || "Upstream error." });
+    const msg = e?.message || "Upstream error.";
+    const friendly =
+      msg.toLowerCase().includes("quota") || msg.toLowerCase().includes("rate")
+        ? "All AI providers are busy right now. Wait a moment and try again."
+        : msg;
+    return res.status(502).json({ error: friendly });
   }
 }
