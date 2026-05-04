@@ -9,7 +9,125 @@ import {
   Trash2,
   ArrowRight,
   X,
+  Lock,
 } from "lucide-react";
+
+function PasswordGate({ onAuth }) {
+  const [pw, setPw] = useState("");
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setLoading(true);
+    setError("");
+    try {
+      const res = await fetch("/api/auth", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password: pw }),
+      });
+      if (res.ok) {
+        onAuth();
+      } else {
+        setError("Wrong password.");
+        setPw("");
+      }
+    } catch {
+      setError("Something went wrong.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div style={{
+      minHeight: "100vh",
+      background: "var(--bg)",
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      padding: 20,
+    }}>
+      <div style={{
+        background: "var(--surface)",
+        border: "1px solid var(--border)",
+        borderRadius: "var(--radius-lg)",
+        padding: "40px 32px",
+        width: "100%",
+        maxWidth: 360,
+        boxShadow: "var(--shadow-md)",
+        textAlign: "center",
+      }}>
+        <div style={{
+          width: 44,
+          height: 44,
+          background: "var(--accent)",
+          borderRadius: 12,
+          display: "grid",
+          placeItems: "center",
+          color: "var(--bg)",
+          margin: "0 auto 20px",
+        }}>
+          <Lock size={20} />
+        </div>
+        <div style={{ fontWeight: 600, fontSize: 18, marginBottom: 6 }}>HumanizeMail</div>
+        <div style={{ color: "var(--text-muted)", fontSize: 14, marginBottom: 28 }}>
+          Enter password to continue
+        </div>
+        <form onSubmit={handleSubmit}>
+          <input
+            type="password"
+            value={pw}
+            onChange={e => setPw(e.target.value)}
+            placeholder="Password"
+            autoFocus
+            style={{
+              width: "100%",
+              padding: "11px 14px",
+              background: "var(--surface-2)",
+              border: "1px solid var(--border)",
+              borderRadius: "var(--radius)",
+              color: "var(--text)",
+              fontSize: 15,
+              outline: "none",
+              marginBottom: 10,
+              fontFamily: "var(--sans)",
+              boxSizing: "border-box",
+            }}
+          />
+          {error && (
+            <div style={{ color: "var(--danger)", fontSize: 13, marginBottom: 10 }}>
+              {error}
+            </div>
+          )}
+          <button
+            type="submit"
+            disabled={loading || !pw}
+            style={{
+              width: "100%",
+              background: loading || !pw ? "var(--text-subtle)" : "var(--accent)",
+              color: "var(--bg)",
+              border: "none",
+              padding: "11px",
+              borderRadius: "var(--radius)",
+              fontWeight: 500,
+              fontSize: 15,
+              cursor: loading || !pw ? "not-allowed" : "pointer",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 7,
+            }}
+          >
+            {loading ? <Loader2 size={15} style={{ animation: "spin 0.9s linear infinite" }} /> : <Lock size={15} />}
+            {loading ? "Checking…" : "Unlock"}
+          </button>
+        </form>
+      </div>
+    </div>
+  );
+}
 
 const TONES = [
   {
@@ -87,7 +205,21 @@ function saveHistory(items) {
   }
 }
 
+function useCookieAuth() {
+  const [authed, setAuthed] = useState(() =>
+    document.cookie.split(";").some(c => c.trim().startsWith("hm_auth="))
+  );
+  return [authed, () => setAuthed(true)];
+}
+
 export default function App() {
+  const [authed, onAuth] = useCookieAuth();
+  if (!authed) return <PasswordGate onAuth={onAuth} />;
+
+  return <AppInner />;
+}
+
+function AppInner() {
   const [input, setInput] = useState(EXAMPLE_TEXT);
   const [output, setOutput] = useState("");
   const [toneIdx, setToneIdx] = useState(1);
