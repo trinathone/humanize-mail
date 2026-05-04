@@ -634,8 +634,9 @@ export default function App() {
                   </span>
                   <span>
                     {lastInput.split(/\s+/).filter(Boolean).length} →{" "}
-                    {output.split(/\s+/).filter(Boolean).length} words
-                    {" "}({Math.round((output.split(/\s+/).filter(Boolean).length / Math.max(1, lastInput.split(/\s+/).filter(Boolean).length)) * 100)}%)
+                    {output.split(/\s+/).filter(Boolean).length} words ·{" "}
+                    {output.length} chars ·{" "}
+                    ({Math.round((output.split(/\s+/).filter(Boolean).length / Math.max(1, lastInput.split(/\s+/).filter(Boolean).length)) * 100)}%)
                   </span>
                 </div>
               )}
