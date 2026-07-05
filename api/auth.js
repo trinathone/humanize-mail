@@ -1,5 +1,6 @@
 // POST /api/auth  { password } → sets httpOnly cookie → 200 or 401
-const PASSWORD = process.env.APP_PASSWORD || "Trinath";
+const PASSWORD = process.env.APP_PASSWORD;
+if (!PASSWORD) throw new Error('APP_PASSWORD env var is required');
 const COOKIE_NAME = "hm_auth";
 const COOKIE_MAX_AGE = 60 * 60 * 24 * 7; // 7 days
 
@@ -12,7 +13,7 @@ export default function handler(req, res) {
     if (body?.password === PASSWORD) {
       res.setHeader(
         "Set-Cookie",
-        `${COOKIE_NAME}=1; HttpOnly; Path=/; Max-Age=${COOKIE_MAX_AGE}; SameSite=Lax`
+        `${COOKIE_NAME}=1; HttpOnly; Path=/; Max-Age=${COOKIE_MAX_AGE}; Secure; SameSite=Lax`
       );
       return res.status(200).json({ ok: true });
     }

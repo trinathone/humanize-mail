@@ -30,10 +30,12 @@ const SYSTEM_PROMPT =
 
 const hits = new Map();
 
+function parseCookies(str) {
+  return Object.fromEntries((str||'').split(';').map(c => c.trim().split('=').map(s => decodeURIComponent(s.trim()))));
+}
+
 function clientIp(req) {
-  const fwd = req.headers["x-forwarded-for"];
-  if (typeof fwd === "string" && fwd.length) return fwd.split(",")[0].trim();
-  return req.socket?.remoteAddress || "unknown";
+  return req.headers['x-real-ip'] || req.socket?.remoteAddress || 'unknown';
 }
 
 function checkRate(ip) {
@@ -249,6 +251,11 @@ export default async function handler(req, res) {
   if (req.method !== "POST") {
     res.setHeader("Allow", "POST");
     return res.status(405).json({ error: "Method not allowed." });
+  }
+
+  const cookies = parseCookies(req.headers.cookie || '');
+  if (cookies['hm_auth'] !== '1') {
+    return res.status(401).json({ error: 'Unauthorized.' });
   }
 
   // Local Ollama override
